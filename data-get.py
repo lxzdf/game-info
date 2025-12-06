@@ -13,7 +13,7 @@ from tqdm import tqdm
 # ==================== 常量设置 ====================
 
 # 尽量先用官方 Web API，失败再用搜索页兜底
-APP_LIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v0002/"
+APP_LIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
 SEARCH_LIST_URL = "https://store.steampowered.com/search/results/"
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 
@@ -24,7 +24,7 @@ USER_AGENT = (
 )
 
 # 区域 & 语言：简体中文
-REGION_CC = "cn"
+REGION_CC = "us"
 LANGUAGE = "schinese"
 
 
