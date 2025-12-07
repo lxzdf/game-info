@@ -12,7 +12,6 @@ from tqdm import tqdm
 
 # ==================== 常量设置 ====================
 
-# 尽量先用官方 Web API，失败再用搜索页兜底
 APP_LIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
 SEARCH_LIST_URL = "https://store.steampowered.com/search/results/"
 APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
@@ -23,9 +22,10 @@ USER_AGENT = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-# 区域 & 语言：简体中文
+# 区域：美区；语言：简体中文
+# 说明：带简中翻译的游戏会返回中文名；没有简中本地化的游戏会返回英文名
 REGION_CC = "us"
-LANGUAGE = "schinese"
+LANGUAGE: Optional[str] = "schinese"
 
 
 @dataclass
@@ -35,7 +35,7 @@ class ParsedRequirements:
     ram: Optional[str]
     storage: Optional[str]
     notes: Optional[str]
-    raw: Optional[str]
+    raw: Optional[str]   # 仅内部使用，不写入 CSV
 
 
 # ==================== 获取 app 列表 ====================
@@ -63,8 +63,10 @@ def fetch_app_list_via_search(limit: Optional[int]) -> List[Dict]:
             "infinite": 1,
             "category1": 998,  # games
             "cc": REGION_CC,
-            "l": LANGUAGE,
         }
+        if LANGUAGE:
+            params["l"] = LANGUAGE
+
         resp = session.get(SEARCH_LIST_URL, params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
@@ -122,33 +124,25 @@ def fetch_app_list(limit: Optional[int]) -> List[Dict]:
 def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
     """
     从 pc_requirements 的 HTML 片段中，解析出:
-      - cpu: 'Intel Core i5-4430 / AMD FX-6300'
-      - gpu: 'NVIDIA GeForce GTX 960 2GB / AMD Radeon R7 370 2GB'
-      - ram: '8 GB RAM'
-      - storage: '需要 40 GB 可用空间'
-      - notes: 规整后的附注事项，例如:
-               '附注事项: SSD required, 1080p/60fps, 高等质量设置...'
-      - raw: 整段原始配置文本
+      - cpu / gpu / ram / storage
+      - notes: 规整后的附注事项
+      - raw: 整段原始配置文本（仅内部使用，不导出）
     """
     if not html_blob:
         return ParsedRequirements(None, None, None, None, None, None)
 
     soup = BeautifulSoup(html_blob, "html.parser")
-    # 把 <br> 等转成换行
     text = soup.get_text("\n", strip=True)
-    # 统一空白
     text = re.sub(r"[ \t]+", " ", text)
     lines = [line.strip() for line in text.split("\n") if line.strip()]
 
     def match_field(patterns):
-        """在整段文本中依次尝试多个正则，抓 '标签: 值' 里的值部分."""
         for pat in patterns:
             m = re.search(pat, text, flags=re.IGNORECASE)
             if m:
                 return m.group(1).strip()
         return None
 
-    # ===== CPU / GPU / RAM / 存储 =====
     cpu = match_field([
         r"(?:处理器|processor|cpu)\s*[:：]\s*([^\n]+)",
     ])
@@ -167,14 +161,11 @@ def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
         r"\s*[:：]?\s*([^\n]+)",
     ])
 
-    # ===== 附注事项 / Additional notes =====
-    # 1）先试图按“附注事项: 内容 / Additional notes: 内容”直接截出“内容”
     notes_content = match_field([
         r"(?:附注事项|附加说明|附加信息)\s*[:：]\s*([^\n]+)",
         r"(?:additional\s+notes?)\s*[:：]\s*([^\n]+)",
     ])
 
-    # 2）再把所有“疑似注意事项”的行收集起来，但去掉纯标签行
     NOTE_KEYS = [
         "附注事项", "注意", "须知", "说明", "其他要求", "其它要求", "备注",
         "additional", "other requirements", "note",
@@ -186,13 +177,11 @@ def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
     extra_lines = []
     for line in lines:
         norm = line.replace("：", ":").strip().lower()
-        # 纯标签行直接跳过
         if norm in label_variants:
             continue
         if any(kw.lower() in norm for kw in NOTE_KEYS):
             extra_lines.append(line)
 
-    # 3）合并 notes_content + extra_lines，去重
     notes_candidates: List[str] = []
     if notes_content:
         notes_candidates.append(notes_content)
@@ -200,7 +189,6 @@ def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
         if line not in notes_candidates:
             notes_candidates.append(line)
 
-    # 4）根据文本里出现的字样，决定前缀是“附注事项:” 还是 “Additional notes:”
     if notes_candidates:
         if "附注事项" in text:
             prefix = "附注事项: "
@@ -208,7 +196,6 @@ def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
             prefix = "Additional notes: "
         else:
             prefix = ""
-
         core = " / ".join(notes_candidates)
         notes = prefix + core
     else:
@@ -221,9 +208,15 @@ def parse_requirements(html_blob: Optional[str]) -> ParsedRequirements:
 
 def fetch_app_details(appid: int) -> Optional[Dict]:
     """
-    拉取某一个 app 的详细信息（简体中文）。
+    拉取某一个 app 的详细信息。
+    LANGUAGE = "schinese" 时：
+      - 有简中本地化：游戏名称是中文；
+      - 没有简中本地化：名称是英文。
     """
-    params = {"appids": appid, "cc": REGION_CC, "l": LANGUAGE}
+    params = {"appids": appid, "cc": REGION_CC}
+    if LANGUAGE:
+        params["l"] = LANGUAGE
+
     try:
         resp = requests.get(
             APP_DETAILS_URL,
@@ -297,8 +290,8 @@ def scrape(
             if not should_keep(details, allowed_publishers):
                 continue
 
-            name_cn = (details.get("name") or "").strip()
-            if not name_cn:
+            name = (details.get("name") or "").strip()
+            if not name:
                 continue
 
             pc_req = details.get("pc_requirements") or {}
@@ -308,7 +301,11 @@ def scrape(
             min_req = parse_requirements(pc_req.get("minimum"))
             rec_req = parse_requirements(pc_req.get("recommended"))
 
-            # 如果最低和推荐都完全没抓到关键信息，就丢弃
+            # 发行日期（发售时间）
+            rel_info = details.get("release_date") or {}
+            release_date = rel_info.get("date")
+
+            # 至少要有一点结构化配置信息（最低或推荐）
             if not any(
                 [
                     min_req.cpu,
@@ -323,19 +320,27 @@ def scrape(
             ):
                 continue
 
+            # 推荐配置：如果没有就用 "None" 字符串
+            rec_cpu = rec_req.cpu or "None"
+            rec_gpu = rec_req.gpu or "None"
+            rec_ram = rec_req.ram or "None"
+            rec_storage = rec_req.storage or "None"
+            rec_notes = rec_req.notes or "None"
+
             row = {
                 "App_ID": details.get("steam_appid"),
-                "游戏名称": name_cn,
+                "游戏名称": name,
+                "发行日期": release_date,
                 "最低CPU": min_req.cpu,
                 "最低显卡": min_req.gpu,
                 "最低内存": min_req.ram,
                 "最低硬盘": min_req.storage,
                 "最低配置的注意事项": min_req.notes,
-                "推荐CPU": rec_req.cpu,
-                "推荐显卡": rec_req.gpu,
-                "推荐内存": rec_req.ram,
-                "推荐硬盘": rec_req.storage,
-                "推荐配置的注意事项": rec_req.notes,
+                "推荐CPU": rec_cpu,
+                "推荐显卡": rec_gpu,
+                "推荐内存": rec_ram,
+                "推荐硬盘": rec_storage,
+                "推荐配置的注意事项": rec_notes,
             }
 
             rows.append(row)
@@ -349,7 +354,7 @@ def scrape(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="从 Steam 抓取（简体中文）游戏配置数据到 CSV。"
+        description="从 Steam 抓取游戏配置数据到 CSV。"
     )
     parser.add_argument(
         "--max-apps",
@@ -360,19 +365,19 @@ def main():
     parser.add_argument(
         "--out",
         type=str,
-        default="steam_game_specs_cn.csv",
+        default="steam_game_specs.csv",
         help="输出 CSV 文件路径。",
     )
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=8,
+        default=4,
         help="并发线程数（越大越快，但太大可能更容易遇到限流/网络错误）。",
     )
     parser.add_argument(
         "--delay",
         type=float,
-        default=0.05,
+        default=0.2,
         help="每成功收集一条记录后 sleep 的秒数，用于温和控制请求节奏。",
     )
     parser.add_argument(
