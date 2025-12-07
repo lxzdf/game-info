@@ -5,12 +5,10 @@ from collections import namedtuple
 Config = namedtuple('Config', ['id', 'cpu', 'gpu', 'ram', 'storage', 'year', 'device_type'])
 
 # CPU层级定义
-TIER_BUDGET = 'budget'
-TIER_MAINSTREAM = 'mainstream'
-TIER_HIGH_END = 'high_end'
-TIER_ENTHUSIAST = 'enthusiast'
-
-# CPU数据库 - 按发布年份精确组织
+TIER_BUDGET = 0
+TIER_MAINSTREAM = 1
+TIER_HIGH_END = 2
+TIER_ENTHUSIAST = 3
 
 # CPU数据库 - 按发布年份和层级组织（扩展版）
 CPU_DATABASE = {
@@ -709,292 +707,341 @@ def get_cpu_brand_ratio(year):
 
 def get_ram_options(year, device_type):
     """
-    根据年份和设备类型返回内存选项。
-    - 数据大致参照 Steam Hardware Survey 2018–2025 的 RAM 分布趋势，
-      再结合 DDR5 市场渗透率报告做了平滑近似。
-    - weight 代表相对占比（百分比近似），每一年的权重和为 100。
+    根据年份和设备类型返回内存选项（近似真实玩家数据）.
+
+    设计原则：
+    - 容量分布尽量贴合 Steam Hardware Survey 的 RAM 趋势：
+      * 2018–2019：8GB 主流，16GB 快速增长
+      * 2020–2021：16GB 成为绝对主流，32GB 开始冒头
+      * 2022–2023：16GB 依然主流，32GB 明显增长
+      * 2024：16GB 仍最多，但 32GB 已到 ~30% 级别
+      * 2025：16GB ≈ 40% 多一点，32GB > 1/3，准备反超
+    - DDR5 从 2021 末开始上市，2022 以后在高端玩家中逐步提升占比：
+      * 2022：DDR5 ≈ 玩家中的个位数 %
+      * 2023：DDR5 ≈ 10–20% 左右
+      * 2024：DDR5 ≈ 30–40% 左右（新平台）
+      * 2025：DDR5 在新装机中占主导，但存量 DDR4 仍很多
+    - 每一年的权重和为 100，方便直接用作 random.choices 的 weights。
     """
 
     if device_type == 'Desktop':
-        # 桌面：以 Steam PC 玩家为主
+        # 桌面端：以 Steam PC 玩家为主（你模拟的是游戏玩家）
         if year <= 2019:
-            # 2018-2019：8GB 仍是主流，16GB 快速增长，32GB/64GB 很少
+            # 2018–2019：8GB 仍然是大头，16GB 快速崛起，32/64 很少
             return [
-                ('8GB DDR4', 52),
-                ('16GB DDR4', 38),
+                ('8GB DDR4', 55),
+                ('16GB DDR4', 35),
                 ('32GB DDR4', 8),
                 ('64GB DDR4', 2),
             ]
+
         elif year == 2020:
-            # 2020：16GB 开始略微超过 8GB
+            # 2020：16GB 和 8GB 接近，16GB 略占上风，32GB 稍有增长
             return [
-                ('8GB DDR4', 35),
-                ('16GB DDR4', 48),
-                ('32GB DDR4', 14),
+                ('8GB DDR4', 40),
+                ('16GB DDR4', 45),
+                ('32GB DDR4', 12),
                 ('64GB DDR4', 3),
             ]
+
         elif year == 2021:
-            # 2021：16GB 已经是明显主流，32GB 增长；DDR5 刚发布，占比可以忽略
+            # 2021：16GB 明显成为主流，32GB 进一步抬头；DDR5 对玩家几乎可忽略
             return [
-                ('8GB DDR4', 28),
-                ('16GB DDR4', 50),
+                ('8GB DDR4', 30),
+                ('16GB DDR4', 48),
                 ('32GB DDR4', 18),
                 ('64GB DDR4', 4),
             ]
+
         elif year == 2022:
-            # 2022：开始出现少量 DDR5，高端玩家小规模采用
+            # 2022：16GB 主流 (~45%)，8GB 仍不少，32GB ~20% 出头；
+            # DDR5 只在少部分新平台和高端玩家中出现
             return [
                 ('8GB DDR4', 25),
 
-                ('16GB DDR4', 36),
-                ('16GB DDR5', 9),
+                ('16GB DDR4', 40),
+                ('16GB DDR5', 5),   # 16GB 中少量 DDR5
 
-                ('32GB DDR4', 20),
-                ('32GB DDR5', 5),
+                ('32GB DDR4', 17),
+                ('32GB DDR5', 5),   # 32GB 玩家里有少部分已经上 DDR5
 
-                ('64GB DDR4', 4),
-                ('64GB DDR5', 1),
+                ('64GB DDR4', 6),
+                ('64GB DDR5', 2),
             ]
+
         elif year == 2023:
-            # 2023：16GB 继续是主流，32GB 明显增长，DDR5 渗透到约 30% 左右
+            # 2023：16GB 依然是“绝对主流”，32GB 进一步上升到 20%+，
+            # DDR5 在新装机里开始比较常见
             return [
-                ('8GB DDR4', 22),
+                ('8GB DDR4', 20),
 
-                ('16GB DDR4', 38),
-                ('16GB DDR5', 12),
+                ('16GB DDR4', 33),
+                ('16GB DDR5', 15),  # 合计 48%
 
-                ('32GB DDR4', 9),
-                ('32GB DDR5', 14),
+                ('32GB DDR4', 10),
+                ('32GB DDR5', 14),  # 合计 24%
 
-                ('64GB DDR4', 1),
-                ('64GB DDR5', 4),
+                ('64GB DDR4', 3),
+                ('64GB DDR5', 5),   # 合计 8%
             ]
+
         elif year == 2024:
-            # 2024：16GB ~ 32GB 两极，32GB 增长很快，DDR5 ~ 50%
+            # 2024：根据 Steam 2024 年秋季数据，16GB ~47%，32GB ~31–32%，8GB 和 64GB 占剩余。
+            # DDR5 在 16/32/64 中大约占到 40% 左右（新平台基本全是 DDR5）。
             return [
-                ('8GB DDR4', 13),
-                ('8GB DDR5', 3),
+                ('8GB DDR4', 12),
+                ('8GB DDR5', 1),    # 8GB DDR5 很少见，但不能说完全没有
 
-                ('16GB DDR4', 28),
-                ('16GB DDR5', 17),
+                ('16GB DDR4', 26),
+                ('16GB DDR5', 21),  # 合计 47%
 
-                ('32GB DDR4', 7),
-                ('32GB DDR5', 25),
+                ('32GB DDR4', 10),
+                ('32GB DDR5', 22),  # 合计 32%
 
-                ('64GB DDR4', 2),
-                ('64GB DDR5', 5),
+                ('64GB DDR4', 3),
+                ('64GB DDR5', 5),   # 合计 8%
             ]
-        else:  # 2025 及以后
-            # 2025：16GB 仍略多于 32GB，但 32GB 已经非常接近；
-            # DDR5 在新装机和高端玩家中基本成为主流
+
+        else:
+            # 2025 及以后：16GB 仍是 top，但 32GB 已经 >1/3，准备成为新主流
+            # DDR4 仍大量存在，但 DDR5 在高端/新平台上已经占主导。
             return [
-                ('8GB DDR4', 10),
-                ('8GB DDR5', 2),
+                ('8GB DDR4', 11),
+                ('8GB DDR5', 3),    # 8GB 新机器里也会出现少量 DDR5
 
-                ('16GB DDR4', 22),
-                ('16GB DDR5', 20),
+                ('16GB DDR4', 18),
+                ('16GB DDR5', 24),  # 合计 42%
 
-                ('32GB DDR4', 1),
-                ('32GB DDR5', 35),
+                ('32GB DDR4', 6),
+                ('32GB DDR5', 30),  # 合计 36%
 
                 ('64GB DDR4', 2),
-                ('64GB DDR5', 8),
+                ('64GB DDR5', 6),   # 合计 8%
             ]
 
     else:
-        # Laptop：笔记本整体会比台式机更保守一些，8GB 持续时间更长
+        # 笔记本：整体会更“保守”一些，8GB 占比更高，32GB/64GB 增长略慢
         if year <= 2019:
-            # 2018-2019：大量 4GB/8GB 入门本，16GB 偏少
+            # 2018–2019：大量 4GB / 8GB 轻薄本，16GB 偏少
             return [
                 ('4GB DDR4', 25),
                 ('8GB DDR4', 60),
                 ('16GB DDR4', 15),
             ]
+
         elif year == 2020:
-            # 2020：4GB 逐步减少，16GB 慢慢变多，32GB 极少
+            # 2020：4GB 开始减少，16GB 慢慢变多
             return [
                 ('4GB DDR4', 15),
                 ('8GB DDR4', 60),
                 ('16GB DDR4', 23),
                 ('32GB DDR4', 2),
             ]
+
         elif year == 2021:
-            # 2021：8GB 仍主力，但 16GB 已经很常见
+            # 2021：8GB 仍是主力，16GB 已经很常见
             return [
                 ('4GB DDR4', 8),
                 ('8GB DDR4', 55),
                 ('16GB DDR4', 32),
                 ('32GB DDR4', 5),
             ]
+
         elif year == 2022:
-            # 2022：开始出现 DDR5/LPDDR5 笔记本，但整体仍以 DDR4 为主
+            # 2022：笔记本也开始有 DDR5，但总体还是 DDR4 为主
+            # 容量分布大致：4GB ~5%，8GB ~45%，16GB ~40%，32GB~8%，64GB~2%
             return [
                 ('4GB DDR4', 5),
 
-                ('8GB DDR4', 43),
-                ('8GB DDR5', 2),
+                ('8GB DDR4', 42),
+                ('8GB DDR5', 3),
 
-                ('16GB DDR4', 29),
-                ('16GB DDR5', 11),
+                ('16GB DDR4', 30),
+                ('16GB DDR5', 10),
 
-                ('32GB DDR4', 8),
+                ('32GB DDR4', 6),
                 ('32GB DDR5', 2),
+
+                ('64GB DDR5', 2),
             ]
+
         elif year == 2023:
-            # 2023：8GB 逐渐不够用，16GB 成为主流，32GB/64GB 在高端本上出现
+            # 2023：8GB 仍然不少，但 16GB 已成主流，32GB/64GB 主要在游戏本和生产力本上
+            # 容量分布大致：4GB ~3%，8GB ~35%，16GB ~43%，32GB~14%，64GB~5%
             return [
                 ('4GB DDR4', 3),
 
-                ('8GB DDR4', 35),
+                ('8GB DDR4', 32),
                 ('8GB DDR5', 3),
 
-                ('16GB DDR4', 29),
-                ('16GB DDR5', 15),
-
-                ('32GB DDR4', 6),
-                ('32GB DDR5', 6),
-
-                ('64GB DDR4', 2),
-                ('64GB DDR5', 1),
-            ]
-        elif year == 2024:
-            # 2024：新款本普遍 16GB 起步（Apple 全系 16GB 起），32GB 在高端/创作本上变多
-            return [
-                ('8GB DDR4', 25),
-                ('8GB DDR5', 5),
-
-                ('16GB DDR4', 27),
+                ('16GB DDR4', 25),
                 ('16GB DDR5', 18),
 
-                ('32GB DDR4', 3),
-                ('32GB DDR5', 17),
+                ('32GB DDR4', 7),
+                ('32GB DDR5', 7),
 
-                # 64GB 几乎都是 DDR5 工作站 / 高端移动工作站
                 ('64GB DDR5', 5),
             ]
-        else:  # 2025 及以后
-            # 2025：买 8GB 本已经被大量媒体认为是“错误选择”，16GB 成默认，
-            # 32GB 在游戏/AI/专业本里越来越常见
+
+        elif year == 2024:
+            # 2024：新款本基本 16GB 起步，32GB 在高端/创作本上越来越多
+            # 容量分布大致：4GB ~1%，8GB ~25%，16GB ~42%，32GB~22%，64GB~10%
             return [
-                ('8GB DDR4', 15),
+                ('4GB DDR4', 1),
+
+                ('8GB DDR4', 20),
                 ('8GB DDR5', 5),
 
-                ('16GB DDR4', 23),
-                ('16GB DDR5', 22),
+                ('16GB DDR4', 18),
+                ('16GB DDR5', 24),
 
-                ('32GB DDR4', 1),
-                ('32GB DDR5', 26),
+                ('32GB DDR4', 7),
+                ('32GB DDR5', 15),
 
-                ('64GB DDR4', 1),
-                ('64GB DDR5', 7),
+                ('64GB DDR5', 10),
             ]
+
+        else:
+            # 2025：买 8GB 本基本属于“将就”，16GB 是默认，32GB 在高端游戏/AI/生产力本里很常见
+            # 容量分布大致：8GB ~18%，16GB ~40%，32GB~30%，64GB~12%
+            return [
+                ('8GB DDR4', 12),
+                ('8GB DDR5', 6),
+
+                ('16GB DDR4', 14),
+                ('16GB DDR5', 26),
+
+                ('32GB DDR4', 5),
+                ('32GB DDR5', 25),
+
+                ('64GB DDR5', 12),
+            ]
+
 
 
 
 def get_storage_options(year, device_type):
     """
-    根据年份和设备类型返回存储选项（近似真实分布）
-    - 参考：Steam Hardware Survey 的硬盘容量分布 + 各年 SSD/HDD 市场趋势。
-    - weight 约等于该配置在该年份玩家中的占比（总和为 100）。
+    根据年份和设备类型返回存储选项（近似真实的玩家分布）
+
+    逻辑依据（简化总结）：
+    - 2018–2019：SSD 已普及，但不少老玩家还有纯 HDD 或 SSD+HDD 组合。
+    - 2020：NVMe SSD 成主流，1TB 开始大规模普及，纯机械盘占比明显降低。
+    - 2021：游戏玩家几乎看不到 256GB 配置，至少 512GB，1TB 非常常见。
+    - 2022–2025：总容量持续上涨，2TB/4TB 在高端玩家中越来越常见，
+      纯 HDD 只出现在少数旧机器上。
     """
 
     if device_type == 'Desktop':
-        # 桌面机：以 PC 玩家/装机市场为主
+        # 桌面机：以游戏玩家 / 装机市场为主
         if year <= 2019:
-            # 2018-2019：SSD 已经普及，但很多人仍有/只用 HDD
+            # 2018–2019：SSD 已经普及，但 HDD / SSD+HDD 组合依然很多
             return [
-                ('256GB SATA SSD', 25),          # 入门整机/早期升级
+                ('256GB SATA SSD', 25),          # 入门整机/早期 SSD 升级
                 ('512GB SATA SSD', 30),          # 主流
                 ('1TB HDD', 25),                 # 纯机械老机器
                 ('256GB SSD + 1TB HDD', 20),     # 系统 SSD + 存储 HDD
             ]
+
         elif year == 2020:
-            # 2020：NVMe 开始大规模普及，但 HDD 仍然常见
+            # 2020：NVMe 大规模普及，“基本都是固态”
+            # 这里让“有 SSD 的配置”占到 90%（含 SSD+HDD），纯 HDD 控制在 10%
             return [
-                ('512GB NVMe SSD', 32),
-                ('1TB NVMe SSD', 28),
-                ('512GB SSD + 1TB HDD', 20),
-                ('2TB HDD', 20),
+                ('512GB NVMe SSD', 25),          # 中低端/预算主机
+                ('1TB NVMe SSD', 35),           # 大量新装机/整机标配
+                ('512GB SSD + 1TB HDD', 30),    # 系统盘 + 数据盘的经典组合
+                ('2TB HDD', 10),                # 少数仍在用纯机械的大容量旧机
             ]
+
         elif year == 2021:
-            # 2021：1TB NVMe 成为主流，2TB NVMe 开始出现
+            # 2021：256GB 基本消失；至少 512GB，1TB 已经非常常见
+            # 纯 HDD 不再作为玩家主配置出现，只保留 NVMe 和 NVMe+HDD 组合
             return [
-                ('512GB NVMe SSD', 30),
-                ('1TB NVMe SSD', 40),
-                ('2TB NVMe SSD', 15),
+                ('512GB NVMe SSD', 20),
+                ('1TB NVMe SSD', 45),
+                ('2TB NVMe SSD', 20),
                 ('1TB NVMe SSD + 2TB HDD', 15),
             ]
+
         elif year == 2022:
-            # 2022：总容量持续上升，2TB NVMe 比例增加，机械盘偏存量
+            # 2022：总容量继续上升，2TB 占比进一步增加
             return [
-                ('512GB NVMe SSD', 22),
-                ('1TB NVMe SSD', 45),
-                ('2TB NVMe SSD', 25),
-                ('1TB NVMe SSD + 2TB HDD', 8),
+                ('512GB NVMe SSD', 15),
+                ('1TB NVMe SSD', 40),
+                ('2TB NVMe SSD', 35),
+                ('1TB NVMe SSD + 2TB HDD', 10),
             ]
+
         elif year == 2023:
-            # 2023：1TB+ 已经是绝对主流，2TB 在玩家中非常常见
+            # 2023：1TB+ 成为绝对主流，2TB 在玩家中非常常见，4TB 开始被部分高端玩家采用
             return [
-                ('512GB NVMe SSD', 16),
-                ('1TB NVMe SSD', 46),
-                ('2TB NVMe SSD', 30),
-                ('4TB NVMe SSD', 8),
-            ]
-        else:  # 2024-2025
-            # 2024-2025：参考 Steam：总空间 >1TB 超过一半，
-            # 新装机/高端玩家倾向 2TB 起步，4TB 也开始变多:contentReference[oaicite:4]{index=4}
-            return [
-                ('512GB NVMe SSD', 10),   # 主要是老机器或极低价整机
+                ('512GB NVMe SSD', 10),
                 ('1TB NVMe SSD', 40),
                 ('2TB NVMe SSD', 35),
                 ('4TB NVMe SSD', 15),
             ]
 
+        else:  # 2024–2025
+            # 2024–2025：新装机往往 2TB 起步，1TB 仍然大量存在，
+            # 4TB 多见于“库大户”（大作+MOD+素材）的高端玩家
+            return [
+                ('512GB NVMe SSD', 8),    # 老机器/极低价配置
+                ('1TB NVMe SSD', 37),
+                ('2TB NVMe SSD', 40),
+                ('4TB NVMe SSD', 15),
+            ]
+
     else:
-        # Laptop：笔记本整体更“保守”，低容量拖后腿时间更长
+        # Laptop：这里同样假定是“游戏玩家用笔记本”，不是办公本
         if year <= 2019:
-            # 2018-2019：办公本/轻薄本以 256/512 SATA 为主，1TB HDD 边缘
+            # 2018–2019：游戏本以 256/512 SATA 为主，部分还带 1TB HDD
             return [
                 ('256GB SATA SSD', 40),
                 ('512GB SATA SSD', 45),
-                ('1TB HDD', 15),
+                ('1TB HDD', 15),  # 少数老款/入门本
             ]
+
         elif year == 2020:
-            # 2020：主流新本切换到 NVMe，256/512 仍占多
+            # 2020：新款游戏本大多改用 NVMe，1TB 开始在中高端本上出现
             return [
-                ('256GB NVMe SSD', 30),
+                ('256GB NVMe SSD', 20),
                 ('512GB NVMe SSD', 55),
-                ('1TB NVMe SSD', 15),
+                ('1TB NVMe SSD', 25),
             ]
+
         elif year == 2021:
-            # 2021：512GB 仍主力，1TB 在中高端本上增多
+            # 2021：256GB 在游戏本上基本看不到了，512/1TB 为主
             return [
-                ('512GB NVMe SSD', 48),
-                ('1TB NVMe SSD', 42),
+                ('512GB NVMe SSD', 45),
+                ('1TB NVMe SSD', 45),
                 ('2TB NVMe SSD', 10),
             ]
+
         elif year == 2022:
-            # 2022：高性能本/游戏本普遍 512-1TB，2TB 仍然少数:contentReference[oaicite:5]{index=5}
-            return [
-                ('512GB NVMe SSD', 40),
-                ('1TB NVMe SSD', 48),
-                ('2TB NVMe SSD', 12),
-            ]
-        elif year == 2023:
-            # 2023：不少游戏本开始标配 1TB，512 仍大量存在
+            # 2022：1TB 在主流游戏本中非常常见，2TB 出现在高端/旗舰机型
             return [
                 ('512GB NVMe SSD', 35),
-                ('1TB NVMe SSD', 52),
-                ('2TB NVMe SSD', 13),
+                ('1TB NVMe SSD', 50),
+                ('2TB NVMe SSD', 15),
             ]
-        else:  # 2024-2025
-            # 2024-2025：媒体普遍建议游戏本“至少 1TB”，
-            # 但实际市场仍有不少 512GB，2TB 是高端/工作站段:contentReference[oaicite:6]{index=6}
+
+        elif year == 2023:
+            # 2023：不少游戏本直接标配 1TB，512GB 仍大量存在，2TB 用于高端和生产力本
             return [
                 ('512GB NVMe SSD', 30),
                 ('1TB NVMe SSD', 55),
                 ('2TB NVMe SSD', 15),
             ]
+
+        else:  # 2024–2025
+            # 2024–2025：媒体普遍建议“游戏本至少 1TB SSD”，
+            # 2TB 开始在中高端游戏本上变得常见
+            return [
+                ('512GB NVMe SSD', 25),
+                ('1TB NVMe SSD', 55),
+                ('2TB NVMe SSD', 20),
+            ]
+
 
 
 
